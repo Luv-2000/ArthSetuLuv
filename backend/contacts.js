@@ -4,8 +4,10 @@ const admin = require('firebase-admin');
 const fs = require('fs');
 const app = express();
 const PORT = 3001;
+const fetch = require('node-fetch');
 
 app.use(cors());
+app.use(express.json());
 
 // Firestore setup
 const serviceAccountPath = './serviceAccountKey.json';
@@ -19,6 +21,7 @@ admin.initializeApp({
 const db = admin.firestore();
 const contactsCollection = db.collection('contacts');
 const balanceDoc = db.collection('accounts').doc('main');
+const transactionsCollection = db.collection('transactions');
 
 const sampleContacts = [
   { name: 'Amit Sharma', photo: 'https://randomuser.me/api/portraits/men/1.jpg' },
@@ -66,6 +69,63 @@ app.get('/api/balance', async (req, res) => {
   } catch (err) {
     console.error('Firestore error (balance):', err);
     res.status(500).json({ error: 'Failed to fetch balance', details: err.message });
+  }
+});
+
+app.post('/api/send-money', async (req, res) => {
+  const { amount, name, photo } = req.body;
+  if (typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({ error: 'Invalid amount' });
+  }
+  try {
+    const doc = await balanceDoc.get();
+    if (!doc.exists) {
+      await balanceDoc.set({ balance: 100000 });
+    }
+    let currentBalance = doc.exists ? doc.data().balance : 100000;
+    if (currentBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    const newBalance = currentBalance - amount;
+    await balanceDoc.set({ balance: newBalance });
+    // Generate a fake transaction id
+    const transactionId = 'TXN' + Math.floor(Math.random() * 1e10).toString().padStart(10, '0');
+    // Store transaction in Firestore
+    await transactionsCollection.add({
+      id: transactionId,
+      name: name || '',
+      photo: photo || '',
+      amount,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+    res.json({ success: true, newBalance, transactionId });
+  } catch (err) {
+    console.error('Error in send-money:', err);
+    res.status(500).json({ error: 'Failed to send money', details: err.message });
+  }
+});
+
+app.get('/api/transactions', async (req, res) => {
+  try {
+    const snapshot = await transactionsCollection.orderBy('timestamp', 'desc').limit(10).get();
+    const transactions = snapshot.docs.map(doc => doc.data());
+    res.json(transactions);
+  } catch (err) {
+    console.error('Error fetching transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions', details: err.message });
+  }
+});
+
+app.get('/api/voice-proxy', async (req, res) => {
+  const prompt = req.query.prompt;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+  const url = `https://arthasetu-ai-282482783617.europe-west1.run.app/api/v1/chat?prompt=${encodeURIComponent(prompt)}&user=vivek`;
+  try {
+    const response = await fetch(url);
+    const data = await response.text();
+    res.send(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch from external API', details: err.message });
   }
 });
 
