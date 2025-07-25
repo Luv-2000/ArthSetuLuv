@@ -8,7 +8,7 @@ const fetch = require('node-fetch');
 
 app.use(cors());
 app.use(express.json());
-
+app.use(express.json());
 // Firestore setup
 const serviceAccountPath = './serviceAccountKey.json';
 if (!fs.existsSync(serviceAccountPath)) {
